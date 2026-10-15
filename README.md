@@ -12,7 +12,8 @@
 * pintos 도커 환경은 kaist-pintos에서 추천하는 qemu 에뮬레이터를 설치하고 사용합니다. 
 * pintos 도커 환경은 9주차부터 13주차까지 같은 환경을 사용합니다. 이 기간동안 별도의 개발 환경을 제공하지 않습니다.
 * 기존 도커 환경과 달리 `vscode`와 통합된 디버깅 환경(F5로 시작하는)을 제공하지 않습니다. 디버깅이 필요한 경우 `gdb`를 사용하세요. 
-* vscode에서 터미널을 오픈하면 자동으로 `source /workspaces/pintos_22.04_lab_docker/pintos/activate`를 실행합니다.
+* 프로젝트 폴더명과 관계없이 컨테이너 내부에서는 `/workspaces/pintos`에 연결됩니다.
+* vscode에서 터미널을 오픈하면 자동으로 `source /workspaces/pintos/pintos/activate`를 실행합니다.
 
 ---
 
@@ -96,6 +97,16 @@ pintos_22.04_lab_docker/
 1. VSCode에서 `Ctrl+Shift+P` (Windows/Linux) 또는 `Cmd+Shift+P` (macOS)를 누릅니다.
 2. 명령어 팔레트에서 `Dev Containers: Reopen in Container`를 선택합니다.
 3. 이후 컨테이너가 자동으로 실행되고 빌드됩니다. 처음 컨테이너를 열면 빌드하는 시간이 오래걸릴 수 있습니다. 빌드 후, 프로젝트가 **컨테이너 안에서 실행됨**.
+
+컨테이너 터미널에서 다음 명령으로 User Programs 프로젝트를 빌드할 수 있습니다:
+
+```bash
+cd /workspaces/pintos/pintos/userprog
+make -j4
+```
+
+Apple Silicon Mac에서도 `linux/amd64` 컨테이너로 실행됩니다.
+설정을 변경한 뒤에는 `Dev Containers: Rebuild Container`를 실행하세요.
 
 ---
 
