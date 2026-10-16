@@ -325,6 +325,9 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+ 
+
+ 
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -345,8 +348,13 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+		argv[argc] = token;
+		argc += 1;
+	}	
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (argv[0]);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -427,14 +435,41 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
-	// argc : 받은 인자 수
-	// argv : 받은 인자가 들어있는 메모리 공간을 가리킴
-	for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
-		argv[argc] = token;
-		argc+=1;
-	}
 
+	for(int i= argc - 1; i >= 0 ; i--){
+		// 1. argv[1]~ argv[n]까지 문자열 다 합치기 
+		// 2. 합친 문자열의 길이 +1 한 것을 변수 a에 넣기
+		// 3. a를 8의 배수로 조정하기
+		// 4. stack 공간 할당
+		// 5. stack에 넣기
+
+
+
+		// rsp 정의 (stack 공간 할당 ?)
+		if_->rsp = if_->rsp - (strlen(argv[i]) + 1);
+		
+		// 공간 할당후 값 넣기 (memcpy)
+		// memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
+		int argv_len;
+		
+		argv_len = strlen(argv[i])+1;
+		
+		int ceil_cal;
+		
+		ceil_cal = 8 - argv_len % 8;
+		
+		if(argv_len % 8 != 0) argv_len = argv_len + ceil_cal; //8의 배수로 맞춰짐
+		
+		memcpy((void*)if_->rsp , argv[i],argv_len);
+		
+		// 문자열 시작 주소 갱신
+		argv[i] = (char*) if_->rsp; // i-1번째 인자 시작 주소 갱신 argv[0] -> 첫번째 인자의 시작 주소를 나타냄 ?
+	}
+	
+	// rdi 정의(argc)(파싱한 인자의 개수)
 	if_->R.rdi = argc;
+	// rsi 정의(argv 배열의 시작 주소) 0번째(첫번째) 인자 시작 주소를 rsi에 넣어주니까
+	if_->R.rsi = argv[1];
 
 	success = true;
 
@@ -554,6 +589,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a minimal stack by mapping a zeroed page at the USER_STACK */
+/* 사용자 프로그램이 사용할 스택 메모리를 준비하고, 스택 포인(rsp)를 초기화하는 함수 */
 static bool
 setup_stack (struct intr_frame *if_) {
 	uint8_t *kpage;

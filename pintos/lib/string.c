@@ -4,7 +4,7 @@
 /* Copies SIZE bytes from SRC to DST, which must not overlap.
    Returns DST. */
 void *
-memcpy (void *dst_, const void *src_, size_t size) {
+memcpy (void *dst_, const void *src_, size_t size) { // memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
 	unsigned char *dst = dst_;
 	const unsigned char *src = src_;
 
