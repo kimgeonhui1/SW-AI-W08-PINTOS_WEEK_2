@@ -1,4 +1,4 @@
-#include "userprog/process.h"
+	#include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -176,6 +176,11 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+	// rsp로 스택 공간 확장 (argv를 돌면서 문자열 길이(strlen() + 1(/0)))
+	// rdi -> args
+	// rsi -> argv 배열의 시작점 (argv[0])
+
+
 	/* And then load the binary */
 	success = load (file_name, &_if);
 
@@ -329,6 +334,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	char *argv[100];
+	int argc=0;
+	char s[] = file_name;
+	char *token, *save_ptr;
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
@@ -416,6 +426,15 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+
+	// argc : 받은 인자 수
+	// argv : 받은 인자가 들어있는 메모리 공간을 가리킴
+	for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+		argv[argc] = token;
+		argc+=1;
+	}
+
+	if_->R.rdi = argc;
 
 	success = true;
 
