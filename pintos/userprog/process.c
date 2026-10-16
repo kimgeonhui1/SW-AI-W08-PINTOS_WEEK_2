@@ -153,6 +153,7 @@ __do_fork (void *aux) {
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
+	/* do iret 은 사용자 프로그램으로 실행을 전환 하는 함수*/
 		do_iret (&if_);
 error:
 	thread_exit ();
@@ -190,6 +191,7 @@ process_exec (void *f_name) {
 		return -1;
 
 	/* Start switched process. */
+	/* do_iret 은 사용자 프로그램으로 실행을 전환하는 함수 */
 	do_iret (&_if);
 	NOT_REACHED ();
 }
@@ -339,7 +341,6 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	char *argv[100];
 	int argc=0;
-	char s[] = file_name;
 	char *token, *save_ptr;
 
 	/* Allocate and activate page directory. */
@@ -430,46 +431,103 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 
 	/* Start address. */
+	/* ELF ehdr에는 프로그램의 시작 주소, 실행 파일의 종류
+		cpu 아키텍처, 프로그램 헤더의 위치와 개수 등이 기록되어 있음
+		rip 는 다음에 실행할 명령어 저장하는 곳
+	*/
 	if_->rip = ehdr.e_entry;
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
+	
+	char all_of_argument[256] = "";
+	int length_of_argument = 0;
 
-	for(int i= argc - 1; i >= 0 ; i--){
-		// 1. argv[1]~ argv[n]까지 문자열 다 합치기 
-		// 2. 합친 문자열의 길이 +1 한 것을 변수 a에 넣기
-		// 3. a를 8의 배수로 조정하기
-		// 4. stack 공간 할당
-		// 5. stack에 넣기
+	// 건희
+	// 1. argv[1]~ argv[n]까지 문자열 길이 구하기 및 문자열 합치기
+	for(int i= 0; i < argc; i++) {
+		int arg_len = strlen(argv[i]) + 1;
+		
 
-
-
-		// rsp 정의 (stack 공간 할당 ?)
-		if_->rsp = if_->rsp - (strlen(argv[i]) + 1);
+	// 2. 인자 문자열들 다 합치기(\0 포함)
+	// memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
+		memcpy(&all_of_argument[length_of_argument], argv[i], arg_len);
 		
-		// 공간 할당후 값 넣기 (memcpy)
-		// memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
-		int argv_len;
-		
-		argv_len = strlen(argv[i])+1;
-		
-		int ceil_cal;
-		
-		ceil_cal = 8 - argv_len % 8;
-		
-		if(argv_len % 8 != 0) argv_len = argv_len + ceil_cal; //8의 배수로 맞춰짐
-		
-		memcpy((void*)if_->rsp , argv[i],argv_len);
-		
-		// 문자열 시작 주소 갱신
-		argv[i] = (char*) if_->rsp; // i-1번째 인자 시작 주소 갱신 argv[0] -> 첫번째 인자의 시작 주소를 나타냄 ?
+	// 인자 문자열의 총 길이 합산
+		length_of_argument += arg_len;
 	}
+
+	// 3 all_of_argument_length를 8의 배수로 조정하기
+	int stack_length = (length_of_argument + 7) & ~7;
+		
+	// 3. 메모리 
+	
+	// 	// 문자열 합치기 함수 strlcat(A, B, C)
+	// 	// A 문자열 뒤에 B 문자열를 이어 붙이고 배열의 최대 크기를 C로 지정 (이어 붙인 문자열의 길이가 C-1 글자가 넘지 않도록 함)
+		
+
+	// 	strlcat(all_of_argument, argv[i], sizeof(all_of_argument)); 
+	// 	strlcat(all_of_argument, "\0", sizeof(all_of_argument));
+		
+	// 	// rsp 정의 (stack 공간 할당 ?)
+	// 	if_->rsp = if_->rsp - (strlen(argv[i]) + 1);
+		
+	// 	// 공간 할당후 값 넣기 (memcpy)
+	// 	// memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
+	// 	int argv_len;
+		
+	// 	argv_len = strlen(argv[i])+1;
+		
+
+	// 	int ceil_cal;
+		
+	// 	ceil_cal = 8 - argv_len % 8;
+		
+	// 	if(argv_len % 8 != 0) argv_len = argv_len + ceil_cal; //8의 배수로 맞춰짐
+		
+	// 	memcpy((void*)if_->rsp , argv[i],argv_len);
+		
+	// 	// 문자열 시작 주소 갱신
+	// 	argv[i] = (char*) if_->rsp; // i-1번째 인자 시작 주소 갱신 argv[0] -> 첫번째 인자의 시작 주소를 나타냄 ?
+	// }
+
+
+	// 재후님
+	// 4. stack 공간 할당
+	if_->rsp = if_->rsp - stack_length;
+	// memset 사용하여 stack에 할당한 공간 0으로 초기화
+	memset((void*)if_->rsp, 0, stack_length);
+	
+	// 5. stack에 넣기
+	memcpy((void*)if_->rsp, all_of_argument, length_of_argument);	
+	
+	// argv[argc] = NULL 처리
+	if_->rsp-=8;
+	*(char **)if_->rsp = NULL;
+
+	// argv[i]에 주소 갱신(최신화) -> 지금 넣은건 인자 문자열들만 넣음
+	// argv[0] ~ argv[n] 까지 인자 문자열을 가리키는 주소를 갱신 ? -> 역순으로 넣음 
+	for(int i= argc-1; i >=0; i--) {
+		if_->rsp -= 8;
+		*(char **)if_->rsp = argv[i]; 
+	}
+
+
+	
+	// 우진님
+
+	// Pintos x86-64 환경에서 NULL 포인터는 8바이트가 모두 0인 값입니다, 위 아래 코드 같은 기능임
 	
 	// rdi 정의(argc)(파싱한 인자의 개수)
 	if_->R.rdi = argc;
 	// rsi 정의(argv 배열의 시작 주소) 0번째(첫번째) 인자 시작 주소를 rsi에 넣어주니까
-	if_->R.rsi = argv[1];
+	if_->R.rsi = if_->rsp; // 수정 필요(우진님)
+
+	// stack 정렬 및 fake return address (rsp 최하단에 위치하는 8byte짜리 공간? 보통 0으로 채움)	 
+	if_->rsp -= 8;
+	memset((void*)if_->rsp,0,8); 
+
 
 	success = true;
 
