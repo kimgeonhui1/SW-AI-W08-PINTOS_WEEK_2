@@ -50,8 +50,14 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	// file_name에서 파일명만 잘라서 줘야 함
+	char cut_file_name[16];
+	char *save_ptr;
+	strlcpy(cut_file_name, file_name, sizeof(cut_file_name));
+	char * only_file_name = strtok_r(cut_file_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (only_file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -211,6 +217,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while(1);
 	return -1;
 }
 
@@ -339,8 +346,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
-	char *argv[100];
-	int argc=0;
+	char *argv[128];
+	int argc = 0;
 	char *token, *save_ptr;
 
 	/* Allocate and activate page directory. */
@@ -349,7 +356,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
-	for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+	for (token = strtok_r ((char*)file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
 		argv[argc] = token;
 		argc += 1;
 	}	
@@ -357,7 +364,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Open executable file. */
 	file = filesys_open (argv[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
@@ -369,7 +376,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
 
@@ -441,93 +448,56 @@ load (const char *file_name, struct intr_frame *if_) {
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
 	
-	char all_of_argument[256] = "";
-	int length_of_argument = 0;
+	int64_t arg_len = 0;
 
-	// 건희
 	// 1. argv[1]~ argv[n]까지 문자열 길이 구하기 및 문자열 합치기
-	for(int i= 0; i < argc; i++) {
-		int arg_len = strlen(argv[i]) + 1;
-		
-
-	// 2. 인자 문자열들 다 합치기(\0 포함)
-	// memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
-		memcpy(&all_of_argument[length_of_argument], argv[i], arg_len);
-		
-	// 인자 문자열의 총 길이 합산
-		length_of_argument += arg_len;
+	for(int i = 0; i < argc; i++){
+		arg_len += strlen(argv[i]) + 1;
 	}
 
 	// 3 all_of_argument_length를 8의 배수로 조정하기
-	int stack_length = (length_of_argument + 7) & ~7;
-		
-	// 3. 메모리 
-	
-	// 	// 문자열 합치기 함수 strlcat(A, B, C)
-	// 	// A 문자열 뒤에 B 문자열를 이어 붙이고 배열의 최대 크기를 C로 지정 (이어 붙인 문자열의 길이가 C-1 글자가 넘지 않도록 함)
-		
+	int64_t stack_length = (arg_len + 7) & ~7;
 
-	// 	strlcat(all_of_argument, argv[i], sizeof(all_of_argument)); 
-	// 	strlcat(all_of_argument, "\0", sizeof(all_of_argument));
-		
-	// 	// rsp 정의 (stack 공간 할당 ?)
-	// 	if_->rsp = if_->rsp - (strlen(argv[i]) + 1);
-		
-	// 	// 공간 할당후 값 넣기 (memcpy)
-	// 	// memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
-	// 	int argv_len;
-		
-	// 	argv_len = strlen(argv[i])+1;
-		
-
-	// 	int ceil_cal;
-		
-	// 	ceil_cal = 8 - argv_len % 8;
-		
-	// 	if(argv_len % 8 != 0) argv_len = argv_len + ceil_cal; //8의 배수로 맞춰짐
-		
-	// 	memcpy((void*)if_->rsp , argv[i],argv_len);
-		
-	// 	// 문자열 시작 주소 갱신
-	// 	argv[i] = (char*) if_->rsp; // i-1번째 인자 시작 주소 갱신 argv[0] -> 첫번째 인자의 시작 주소를 나타냄 ?
-	// }
-
-
-	// 재후님
-	// 4. stack 공간 할당
+	// 4. stack 공간 할당 
 	if_->rsp = if_->rsp - stack_length;
 	// memset 사용하여 stack에 할당한 공간 0으로 초기화
 	memset((void*)if_->rsp, 0, stack_length);
 	
-	// 5. stack에 넣기
-	memcpy((void*)if_->rsp, all_of_argument, length_of_argument);	
-	
+	// stack에 인자 문자열 순서대로 복사
+	char *curr_addr = (char *)if_->rsp;
+	for (int i = 0; i < argc; i++) {
+		int one_arg_len = strlen(argv[i]) + 1;		// 인자 문자열의 길이 구하기
+		memcpy(curr_addr, argv[i], one_arg_len);	// 스택의 빈 공간에 인자 문자열 복사
+    	argv[i] = curr_addr;                   		// argv[i]가 가리키는 곳을 스택 주소로 갱신
+    	curr_addr += one_arg_len;   				// 다음 문자열 시작 위치로 이동
+	}
+
 	// argv[argc] = NULL 처리
-	if_->rsp-=8;
+	if_->rsp -= 8;
 	*(char **)if_->rsp = NULL;
 
 	// argv[i]에 주소 갱신(최신화) -> 지금 넣은건 인자 문자열들만 넣음
 	// argv[0] ~ argv[n] 까지 인자 문자열을 가리키는 주소를 갱신 ? -> 역순으로 넣음 
-	for(int i= argc-1; i >=0; i--) {
+	for(int i= argc-1; i >= 0; i--) {
 		if_->rsp -= 8;
 		*(char **)if_->rsp = argv[i]; 
 	}
-
-
-	
-	// 우진님
 
 	// Pintos x86-64 환경에서 NULL 포인터는 8바이트가 모두 0인 값입니다, 위 아래 코드 같은 기능임
 	
 	// rdi 정의(argc)(파싱한 인자의 개수)
 	if_->R.rdi = argc;
 	// rsi 정의(argv 배열의 시작 주소) 0번째(첫번째) 인자 시작 주소를 rsi에 넣어주니까
-	if_->R.rsi = if_->rsp; // 수정 필요(우진님)
+	if_->R.rsi = if_->rsp; 
 
+	if(if_->rsp % 16 == 8) {
+		if_->rsp -= 8;
+		memset ((void *) if_->rsp, 0, 8);
+	}
+	
 	// stack 정렬 및 fake return address (rsp 최하단에 위치하는 8byte짜리 공간? 보통 0으로 채움)	 
 	if_->rsp -= 8;
 	memset((void*)if_->rsp,0,8); 
-
 
 	success = true;
 

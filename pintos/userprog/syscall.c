@@ -7,6 +7,7 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "threads/vaddr.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -44,3 +45,34 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	printf ("system call!\n");
 	thread_exit ();
 }
+
+void
+check_addr(void * addr){
+	struct thread *curr = thread_current();
+
+	// NULL 포인터인지
+	// 커널 공간을 가리키고 있는지
+	// 페이지 테이블(pml4)에 매핑되어 있는지
+	if (addr == NULL || !is_user_vaddr (addr) || pml4_get_page (curr->pml4, addr) == NULL)  exit (-1);
+	
+}
+
+// 페이지 단위 검사하는(check_addr()함수 사용)함수 구현해야함
+// -> read, write에서 사용
+void
+check_addr_page(){
+
+
+}
+
+// 1byte 단위로 검사하는 함수 구현해야함?
+// -> fork, exec, create, remove, open에서 사용
+void
+check_addr_byte(){
+	
+}
+
+// pg_round_down(페이지에 들어가있는 주소?) -> 페이지의 시작점을 알려줌
+// pg_round_up () -> 페이지의 끝을 알려줌
+
+
