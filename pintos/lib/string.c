@@ -4,7 +4,7 @@
 /* Copies SIZE bytes from SRC to DST, which must not overlap.
    Returns DST. */
 void *
-memcpy (void *dst_, const void *src_, size_t size) {
+memcpy (void *dst_, const void *src_, size_t size) { // memcpy(데이터가 복사될 목적지, 복사할 원본, 복사할 Byte)
 	unsigned char *dst = dst_;
 	const unsigned char *src = src_;
 
@@ -326,7 +326,10 @@ strlcpy (char *dst, const char *src, size_t size) {
    increasingly popular extension.  See
 http://www.courtesan.com/todd/papers/strlcpy.html for
 information on strlcpy(). */
-size_t
+
+// 문자열 합치기 함수 strlcat(A, B, C)
+// A 문자열 뒤에 B 문자열를 이어 붙이고 배열의 최대 크기를 C로 지정 (이어 붙인 문자열의 길이가 C-1 글자가 넘지 않도록 함)
+size_t 
 strlcat (char *dst, const char *src, size_t size) {
 	size_t src_len, dst_len;
 

@@ -1,4 +1,4 @@
-#include "userprog/process.h"
+	#include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "devices/timer.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -50,8 +51,14 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	// file_name에서 파일명만 잘라서 줘야 함
+	char cut_file_name[16];
+	char *save_ptr;
+	strlcpy(cut_file_name, file_name, sizeof(cut_file_name));
+	char * only_file_name = strtok_r(cut_file_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (only_file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -153,6 +160,7 @@ __do_fork (void *aux) {
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
+	/* do iret 은 사용자 프로그램으로 실행을 전환 하는 함수*/
 		do_iret (&if_);
 error:
 	thread_exit ();
@@ -176,6 +184,11 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+	// rsp로 스택 공간 확장 (argv를 돌면서 문자열 길이(strlen() + 1(/0)))
+	// rdi -> args
+	// rsi -> argv 배열의 시작점 (argv[0])
+
+
 	/* And then load the binary */
 	success = load (file_name, &_if);
 
@@ -185,6 +198,7 @@ process_exec (void *f_name) {
 		return -1;
 
 	/* Start switched process. */
+	/* do_iret 은 사용자 프로그램으로 실행을 전환하는 함수 */
 	do_iret (&_if);
 	NOT_REACHED ();
 }
@@ -204,6 +218,8 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	// while(1);
+	timer_sleep(100);
 	return -1;
 }
 
@@ -215,6 +231,7 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	printf ("%s: exit(%d)\n", curr->name, curr->status_exit);
 
 	process_cleanup ();
 }
@@ -320,6 +337,9 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+ 
+
+ 
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -329,16 +349,25 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+	char *argv[128];
+	int argc = 0;
+	char *token, *save_ptr;
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
 
+	for (token = strtok_r ((char*)file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+		argv[argc] = token;
+		argc += 1;
+	}	
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (argv[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
 
@@ -350,7 +379,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv[0]);
 		goto done;
 	}
 
@@ -412,10 +441,66 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 
 	/* Start address. */
+	/* ELF ehdr에는 프로그램의 시작 주소, 실행 파일의 종류
+		cpu 아키텍처, 프로그램 헤더의 위치와 개수 등이 기록되어 있음
+		rip 는 다음에 실행할 명령어 저장하는 곳
+	*/
 	if_->rip = ehdr.e_entry;
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+
+	
+	int64_t arg_len = 0;
+
+	// 1. argv[1]~ argv[n]까지 문자열 길이 구하기 및 문자열 합치기
+	for(int i = 0; i < argc; i++){
+		arg_len += strlen(argv[i]) + 1;
+	}
+
+	// 3 all_of_argument_length를 8의 배수로 조정하기
+	int64_t stack_length = (arg_len + 7) & ~7;
+
+	// 4. stack 공간 할당 
+	if_->rsp = if_->rsp - stack_length;
+	// memset 사용하여 stack에 할당한 공간 0으로 초기화
+	memset((void*)if_->rsp, 0, stack_length);
+	
+	// stack에 인자 문자열 순서대로 복사
+	char *curr_addr = (char *)if_->rsp;
+	for (int i = 0; i < argc; i++) {
+		int one_arg_len = strlen(argv[i]) + 1;		// 인자 문자열의 길이 구하기
+		memcpy(curr_addr, argv[i], one_arg_len);	// 스택의 빈 공간에 인자 문자열 복사
+    	argv[i] = curr_addr;                   		// argv[i]가 가리키는 곳을 스택 주소로 갱신
+    	curr_addr += one_arg_len;   				// 다음 문자열 시작 위치로 이동
+	}
+
+	// argv[argc] = NULL 처리
+	if_->rsp -= 8;
+	*(char **)if_->rsp = NULL;
+
+	// argv[i]에 주소 갱신(최신화) -> 지금 넣은건 인자 문자열들만 넣음
+	// argv[0] ~ argv[n] 까지 인자 문자열을 가리키는 주소를 갱신 ? -> 역순으로 넣음 
+	for(int i= argc-1; i >= 0; i--) {
+		if_->rsp -= 8;
+		*(char **)if_->rsp = argv[i]; 
+	}
+
+	// Pintos x86-64 환경에서 NULL 포인터는 8바이트가 모두 0인 값입니다, 위 아래 코드 같은 기능임
+	
+	// rdi 정의(argc)(파싱한 인자의 개수)
+	if_->R.rdi = argc;
+	// rsi 정의(argv 배열의 시작 주소) 0번째(첫번째) 인자 시작 주소를 rsi에 넣어주니까
+	if_->R.rsi = if_->rsp; 
+
+	if(if_->rsp % 16 == 8) {
+		if_->rsp -= 8;
+		memset ((void *) if_->rsp, 0, 8);
+	}
+	
+	// stack 정렬 및 fake return address (rsp 최하단에 위치하는 8byte짜리 공간? 보통 0으로 채움)	 
+	if_->rsp -= 8;
+	memset((void*)if_->rsp,0,8); 
 
 	success = true;
 
@@ -535,6 +620,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a minimal stack by mapping a zeroed page at the USER_STACK */
+/* 사용자 프로그램이 사용할 스택 메모리를 준비하고, 스택 포인(rsp)를 초기화하는 함수 */
 static bool
 setup_stack (struct intr_frame *if_) {
 	uint8_t *kpage;
