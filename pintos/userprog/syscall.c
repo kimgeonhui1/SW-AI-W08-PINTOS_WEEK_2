@@ -7,10 +7,14 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "lib/kernel/console.h"
+#include "threads/synch.h"
+#include "lib/kernel/stdio.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+struct lock filesys_lock;
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -26,6 +30,7 @@ void syscall_handler (struct intr_frame *);
 
 void
 syscall_init (void) {
+	lock_init(&filesys_lock);
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
@@ -44,3 +49,15 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	printf ("system call!\n");
 	thread_exit ();
 }
+
+int 
+write(int fd, const void *buffer, unsigned size){
+	// 콘솔 출력
+	if(fd==1){
+		putbuf(buffer,size);
+		return size;
+	}
+	// 파일에 쓰기
+	// lock_acquire(&filesys_lock);
+
+} 
