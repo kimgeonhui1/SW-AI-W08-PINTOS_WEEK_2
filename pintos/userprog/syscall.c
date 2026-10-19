@@ -54,22 +54,43 @@ check_addr(void * addr){
 	// 커널 공간을 가리키고 있는지
 	// 페이지 테이블(pml4)에 매핑되어 있는지
 	if (addr == NULL || !is_user_vaddr (addr) || pml4_get_page (curr->pml4, addr) == NULL)  exit (-1);
-	
+	return;
 }
 
 // 페이지 단위 검사하는(check_addr()함수 사용)함수 구현해야함
 // -> read, write에서 사용
 void
-check_addr_page(){
+check_addr_page(void * buffer, size_t size){
+	// 예외사항
+	if(buffer == NULL) exit(-1);
+	if(size ==0) return;
 
+	const char *str_start = (const char *)buffer;
+    const char *str_end = str_start + size - 1;	
 
+	// 시작주소 ~ 끝주소까지 페이지 단위로 검사
+	for(char *page = pg_round_down(str_start); page <= str_end; page += PGSIZE) check_addr(page);
+
+	return;
 }
 
 // 1byte 단위로 검사하는 함수 구현해야함?
 // -> fork, exec, create, remove, open에서 사용
 void
-check_addr_byte(){
+check_addr_byte(char *string){
+	// while(*string != '\0'){
+	// 	check_addr((void *)string);
+	// 	string++;
+	// }
+
+	// 
+	check_addr((void *)string);
+	while(*string != '\0'){
+		string++;
+		check_addr((void *)string);
+	}
 	
+	return;
 }
 
 // pg_round_down(페이지에 들어가있는 주소?) -> 페이지의 시작점을 알려줌
