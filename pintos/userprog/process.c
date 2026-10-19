@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -33,6 +34,12 @@ process_init(void)
 {
 	struct thread *current = thread_current();
 }
+
+struct initd_args
+{
+	char *file_name;
+	struct child_status *status;
+};
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
@@ -51,24 +58,65 @@ tid_t process_create_initd(const char *file_name)
 		return TID_ERROR;
 	strlcpy(fn_copy, file_name, PGSIZE);
 
-	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
+	struct child_status *status = malloc(sizeof *status);
+	if (status == NULL)
+	{
 		palloc_free_page(fn_copy);
+		return TID_ERROR;
+	}
+	status->tid = TID_ERROR;
+	status->exit_status = -1;
+	sema_init(&status->exit_sema, 0);
+
+	struct initd_args *args = malloc(sizeof *args);
+	if (args == NULL)
+	{
+		free(status);
+		palloc_free_page(fn_copy);
+		return TID_ERROR;
+	}
+
+	args->file_name = fn_copy;
+	args->status = status;
+
+	/* Create a new thread to execute FILE_NAME. */
+	tid = thread_create(file_name, PRI_DEFAULT, initd, args);
+	if (tid == TID_ERROR)
+	{
+		free(args);
+		free(status);
+		palloc_free_page(fn_copy);
+		return TID_ERROR;
+	}
+	status->tid = tid;
+	list_push_back(&thread_current()->children, &status->elem);
 	return tid;
 }
 
 /* A thread function that launches first user process. */
 static void
-initd(void *f_name)
+initd(void *aux)
 {
+	struct initd_args *args = aux;
+	char *file_name = args->file_name;
+	thread_current()->self_status = args->status;
+	free(args);
+	char name[sizeof thread_current()->name];
+	char *save_ptr;
+
+	strlcpy(name, file_name, sizeof name);
+	char *program_name = strtok_r(name, " ", &save_ptr);
+
+	if (program_name != NULL)
+		strlcpy(thread_current()->name, program_name,
+				sizeof thread_current()->name);
 #ifdef VM
 	supplemental_page_table_init(&thread_current()->spt);
 #endif
 
 	process_init();
 
-	if (process_exec(f_name) < 0)
+	if (process_exec(file_name) < 0)
 		PANIC("Fail to launch initd\n");
 	NOT_REACHED();
 }
@@ -212,19 +260,49 @@ int process_wait(tid_t child_tid UNUSED)
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+	struct thread *curr = thread_current();
+	struct child_status *child = NULL;
+	struct list_elem *e;
+
+	for (e = list_begin(&curr->children);
+		 e != list_end(&curr->children);
+		 e = list_next(e))
+	{
+		struct child_status *status =
+			list_entry(e, struct child_status, elem);
+		if (status->tid == child_tid)
+		{
+			child = status;
+			break;
+		}
+	}
+
+	if (child == NULL)
+		return -1;
+	list_remove(&child->elem);
+
+	sema_down(&child->exit_sema);
+
+	return child->exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
+	struct child_status *status = curr->self_status;
 	/* TODO: Your code goes here.
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	if (status != NULL)
+		printf("%s: exit(%d)\n", curr->name, status->exit_status);
+
 	process_cleanup();
+
+	if (status != NULL)
+		sema_up(&status->exit_sema);
 }
 
 /* Free the current process's resources. */

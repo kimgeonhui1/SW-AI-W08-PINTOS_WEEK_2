@@ -18,6 +18,8 @@ enum thread_status {
 	THREAD_DYING        /* About to be destroyed. */
 };
 
+struct child_status;
+
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -111,6 +113,9 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
+
+	struct list children;
+	struct child_status *self_status;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

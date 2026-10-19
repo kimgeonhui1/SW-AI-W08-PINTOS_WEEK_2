@@ -10,9 +10,10 @@
 #include "lib/kernel/console.h"
 #include "threads/synch.h"
 #include "lib/kernel/stdio.h"
+#include "userprog/process.h"
 
-void syscall_entry (void);
-void syscall_handler (struct intr_frame *);
+void syscall_entry(void);
+void syscall_handler(struct intr_frame *);
 
 struct lock filesys_lock;
 /* System call.
@@ -24,40 +25,57 @@ struct lock filesys_lock;
  * The syscall instruction works by reading the values from the the Model
  * Specific Register (MSR). For the details, see the manual. */
 
-#define MSR_STAR 0xc0000081         /* Segment selector msr */
-#define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
+#define MSR_STAR 0xc0000081			/* Segment selector msr */
+#define MSR_LSTAR 0xc0000082		/* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
-void
-syscall_init (void) {
+void syscall_init(void)
+{
 	lock_init(&filesys_lock);
-	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
-			((uint64_t)SEL_KCSEG) << 32);
-	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
+	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 |
+							((uint64_t)SEL_KCSEG) << 32);
+	write_msr(MSR_LSTAR, (uint64_t)syscall_entry);
 
 	/* The interrupt service rountine should not serve any interrupts
 	 * until the syscall_entry swaps the userland stack to the kernel
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
-			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+			  FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
 /* The main system call interface */
-void
-syscall_handler (struct intr_frame *f UNUSED) {
+void syscall_handler(struct intr_frame *f)
+{
 	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+	switch (f->R.rax)
+	{
+	case SYS_WRITE:
+	{
+		int fd = (int)f->R.rdi;
+		const void *buffer = (const void *)f->R.rsi;
+		unsigned size = (unsigned)f->R.rdx;
+
+		f->R.rax = write(fd, buffer, size);
+		break;
+	}
+	case SYS_EXIT:
+	{
+		int status = (int)f->R.rdi;
+		if (thread_current()->self_status != NULL)
+			thread_current()->self_status->exit_status = status;
+		thread_exit();
+	}
+	}
 }
 
-int 
-write(int fd, const void *buffer, unsigned size){
+int write(int fd, const void *buffer, unsigned size)
+{
 	// 콘솔 출력
-	if(fd==1){
-		putbuf(buffer,size);
+	if (fd == 1)
+	{
+		putbuf(buffer, size);
 		return size;
 	}
 	// 파일에 쓰기
 	// lock_acquire(&filesys_lock);
-
-} 
+}
