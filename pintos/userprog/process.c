@@ -1,4 +1,4 @@
-	#include "userprog/process.h"
+#include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -231,7 +231,28 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	printf ("%s: exit(%d)\n", curr->name, curr->status_exit);
+	
+	if (curr->pml4 != NULL) {
+    	printf ("%s: exit(%d)\n", curr->name, curr->status_exit);
+	}
+
+	// 열려 있는 모든 파일 닫기
+	if (curr->fdt != NULL) {
+		// fd = 0은 stdin(표준 입력),  fd = 1은 stdout(표준 출력)이기에 fd=2부터
+		// 1페이지는 4KB 이기에 포인터는 8바이트이기에 4096 / 8 = 512이니, 2~511까지 순회
+        for (int fd = 2; fd < 512; fd++) {
+			struct file *file = curr->fdt[fd];   
+			if (file != NULL) {            
+				file_close (file);
+				curr->fdt[fd] = NULL;
+            }
+        }
+        // FDT 페이지 메모리 해제
+        palloc_free_page (curr->fdt);
+        curr->fdt = NULL;
+    }
+
+
 
 	process_cleanup ();
 }

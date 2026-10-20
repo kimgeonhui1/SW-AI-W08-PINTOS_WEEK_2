@@ -11,6 +11,9 @@
 #include "threads/init.h"
 #include "threads/synch.h"
 #include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "devices/input.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -203,8 +206,6 @@ void halt(void){
 void exit(int status){
 	thread_current() ->status_exit = status;
 
-
-
 	// 현재 실행중인 스레드를 강제 종료시킴
 	thread_exit();
 }
@@ -212,40 +213,196 @@ void exit(int status){
 int write(int fd, const void *buffer, unsigned size){
 	check_addr_page((void *)buffer, size);
 
+    struct thread *curr = thread_current();
+
+    if (size == 0) return size;
+
 	if (fd == 1){
 		putbuf((char *)buffer, size);
 		return size;
 	}
-	else if (fd == 0){
+	else if (fd <= 0 || fd >= 512){
 		return -1;
 	}
-	
-	// struct file *file = fd_to_file(fd);
-    // if (file == NULL) {
-    //     return -1;
-    // }
+    else{
+        struct file *file = curr->fdt[fd];
 
-    // lock_acquire(&filesys_lock); 
-    // int64_t write_size = file_write(file, buffer, size);
-    // lock_release(&filesys_lock);
+        if (file == NULL) return -1;
 
-    // return write_size;
-	return -1;
+        lock_acquire(&filesys_lock);
+
+        int write_size = file_write(file, buffer, size);
+        
+        lock_release(&filesys_lock);
+    	
+        return write_size;
+    }
 }
 
 tid_t fork (const char *thread_name, struct intr_frame *f) { return -1; }
-int exec (const char *cmd_line) { return -1; }
+
+int exec (const char *cmd_line) { 
+	check_addr_byte((char *)cmd_line);
+
+    // process_exec();
+	return -1; 
+}
+
 int wait (tid_t pid) { 
 	// if(!is_my_direct_child(pid)) return -1;
 
 	return process_wait(pid);
 }
 
-bool create (const char *file, unsigned initial_size) { return false; }
-bool remove (const char *file) { return false; }
-int open (const char *file) { return -1; }
-int filesize (int fd) { return -1; }
-int read (int fd, void *buffer, unsigned size) { return -1; }
-void seek (int fd, unsigned position) {}
-unsigned tell (int fd) { return 0; }
-void close (int fd) {}
+bool create (const char *file, unsigned initial_size) { 
+	check_addr_byte((char *)file);
+
+    lock_acquire(&filesys_lock);
+
+    bool success = filesys_create(file, initial_size);
+
+    lock_release(&filesys_lock);
+
+	return success;
+}
+
+bool remove (const char *file) { 
+	check_addr_byte((char *)file);	
+
+    lock_acquire(&filesys_lock);
+
+    bool success = filesys_remove(file);
+
+    lock_release(&filesys_lock);
+	return success; 
+}
+
+int open (const char *file) { 
+	check_addr_byte((char *)file);
+    struct thread *curr = thread_current();
+
+    lock_acquire(&filesys_lock);
+    struct file *f = filesys_open (file);
+
+    if(f == NULL){
+        lock_release(&filesys_lock);
+        return -1;
+    } 
+
+    int allocate_fd = -1;
+
+    // 비어있는 슬롯 찾기
+    for (int fd = 2; fd < 512; fd++) {
+        struct file *file = curr->fdt[fd];   
+			if (file == NULL) {            
+				curr->fdt[fd] = f;
+                curr->next_fd = fd + 1;
+                allocate_fd = fd;
+                break;
+            }
+    }    
+
+    // 비어 있는 슬롯이 없다면 file 닫기
+    if(allocate_fd == -1) file_close(f);
+
+    lock_release(&filesys_lock);
+    return allocate_fd;
+
+}
+
+int filesize (int fd) { 
+    struct thread * curr = thread_current();
+
+    if ( fd < 2 || fd >= 512 || curr->fdt[fd] == NULL) return -1;
+
+    lock_acquire(&filesys_lock);
+
+    int file_len = file_length(curr->fdt[fd]);
+
+    lock_release(&filesys_lock);
+    
+    return file_len; 
+}
+
+int read (int fd, void *buffer, unsigned size) { 
+	check_addr_page((void*)buffer, size);
+	
+    struct thread *curr = thread_current();
+
+    if (size == 0) return 0;
+
+    if(fd==0){
+        // buffer는 void* 이므로 byte 단위로 접근을 위해 형변환
+        char *char_buffer = (char *)buffer;
+        for(int i = 0; i < size; i++){
+            // loop를 돌며 size만큼 키보드에서 입력을 받아오며(input_getc) buffer배열에 넣기
+            char_buffer[i] = input_getc();
+        }
+        // size만큼 작성했으니 size return
+        return size;
+    }
+
+    // 잘못된 접근
+    else if(fd < 2 || fd >= 512) return -1;
+    
+    else{
+        struct file *file = curr->fdt[fd];
+
+        if (file == NULL) return -1;
+
+        lock_acquire(&filesys_lock);
+        
+        int read_size = file_read(file, buffer, size);
+
+        lock_release(&filesys_lock);
+        return read_size;
+    }
+    return -1; 
+}
+
+void seek (int fd, unsigned position) {
+    if (fd < 2 || fd >= 512) return;
+
+    struct thread *curr = thread_current();
+    struct file *file = curr->fdt[fd];
+
+    if(file == NULL) return;
+
+    lock_acquire(&filesys_lock);
+    file_seek(file, position);
+    lock_release(&filesys_lock);
+
+    return;
+}
+
+unsigned tell (int fd) { 
+    if (fd < 2 || fd >= 512) return -1;
+
+    struct thread *curr = thread_current();
+    struct file *file = curr->fdt[fd];
+
+    if(file == NULL) return;
+
+    lock_acquire(&filesys_lock);
+    off_t offset = file_tell(file);
+    lock_release(&filesys_lock);
+
+
+    return (unsigned)offset; 
+}
+
+void close (int fd) {
+    if (fd < 0 || fd == 0 || fd == 1 || fd >= 512) return;
+
+    struct thread *curr = thread_current();
+
+    if(curr->fdt[fd] == NULL) return;
+
+    lock_acquire(&filesys_lock);
+    file_close(curr->fdt[fd]);
+    curr->fdt[fd] = NULL;
+
+    lock_release(&filesys_lock);
+
+    return;
+}

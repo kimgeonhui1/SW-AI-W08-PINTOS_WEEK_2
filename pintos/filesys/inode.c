@@ -13,10 +13,10 @@
 /* On-disk inode.
  * Must be exactly DISK_SECTOR_SIZE bytes long. */
 struct inode_disk {
-	disk_sector_t start;                /* First data sector. */
-	off_t length;                       /* File size in bytes. */
-	unsigned magic;                     /* Magic number. */
-	uint32_t unused[125];               /* Not used. */
+	disk_sector_t start;                /* 파일의 데이터가 디스크에 어디에 처음으로 저장되어있는지 */
+	off_t length;                       /* 파일의 전체 크기 */
+	unsigned magic;                     /* 디스크에 저장된 데이터가 깨지지 않았는지, 올바른 inode disk 데이터인지 확인하기 위한 상수 값 */
+	uint32_t unused[125];               /* 디스크 블록/섹터 크기(보통 512바이트)에 딱 맞춰 공간을 채우기 위해, 나중에 확장하거나 남겨둔 예비 공간(패딩)입니다 */
 };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -28,12 +28,12 @@ bytes_to_sectors (off_t size) {
 
 /* In-memory inode. */
 struct inode {
-	struct list_elem elem;              /* Element in inode list. */
-	disk_sector_t sector;               /* Sector number of disk location. */
-	int open_cnt;                       /* Number of openers. */
-	bool removed;                       /* True if deleted, false otherwise. */
-	int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-	struct inode_disk data;             /* Inode content. */
+	struct list_elem elem;              /* inode 간의 연결을 위한 elem */
+	disk_sector_t sector;               /* 해당 inode 데이터가 디스크상의 어느 위치에 저장되어있는지를 나타내는 디스크 주소 */
+	int open_cnt;                       /* 이 파일을 열고 있는 프로세스/객체가 몇개인지 세는 카운터 */
+	bool removed;                       /* 파일이 삭제되었는지 여부 */
+	int deny_write_cnt;                 /* 쓰기 가능 여부 (0이면 쓰기 가능, 0 이상이면 쓰기 불가(수정 불가)) */
+	struct inode_disk data;             /* 파일의 크기나 데이터가 어느 블록들에 나눠 저장되어 있는지 등 파일의 상세 데이터를 담고 있는 구조체 */
 };
 
 /* Returns the disk sector that contains byte offset POS within
