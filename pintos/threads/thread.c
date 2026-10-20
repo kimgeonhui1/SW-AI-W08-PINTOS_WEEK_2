@@ -588,6 +588,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->running_file = NULL;
 
 	list_init(&t->children);
+
+	t->fork_success=false;
+	sema_init(&t->fork_done,0);
 #endif
 
 	t->status = THREAD_BLOCKED;

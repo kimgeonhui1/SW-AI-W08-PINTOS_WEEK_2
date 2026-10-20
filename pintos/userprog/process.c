@@ -88,10 +88,17 @@ process_fork (const char *name, struct intr_frame *if_) {
 
 	/* 스케줄링용 tf와 구분하여 자식이 이어갈 사용자 실행 상태를 보관한다. */
 	parent->fork_if = *if_; /* 부모 */
+	parent->fork_success=false;
 
-	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, parent);
+	tid_t tid= thread_create (name,	PRI_DEFAULT, __do_fork, parent);
+
+	if (tid==TID_ERROR) return TID_ERROR;
+	
+	sema_down(&parent->fork_done);
+
+	if(!parent->fork_success) return TID_ERROR;
+
+	return tid;
 }
 
 #ifndef VM
@@ -129,9 +136,9 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
-
 	/* 6. TODO: if fail to insert page, do error handling. */
-
+		palloc_free_page(newpage);
+		return false;
 	}
 	return true;
 }
@@ -156,7 +163,7 @@ __do_fork (void *aux) {
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
 	/*  부모의 process_fork(): */
 
-	
+
 	/* 1. Read the cpu context to local stack. */
 	/* 자식의 커널 스택에 복사해 사용자 모드 복귀 시 레지스터를 복원한다. */
 	/* 부모의 *if_ → parent->fork_if → 자식의 if_ */
@@ -225,11 +232,17 @@ __do_fork (void *aux) {
 	lock_release(&filesys_lock);
 	process_init ();
 
+	parent->fork_success=true;
+	sema_up(&parent->fork_done);
+
 	/* Finally, switch to the newly created process. */
 	/* do iret 은 사용자 프로그램으로 실행을 전환 하는 함수*/
 	if (succ)
 		do_iret (&if_);
 error:
+	current->status_exit=-1;
+	parent->fork_success = false;
+    sema_up(&parent->fork_done);
 	thread_exit ();
 }
 
@@ -328,6 +341,14 @@ process_cleanup (void) {
 		pml4_activate (NULL);
 		pml4_destroy (pml4);
 	}
+
+	/* 종료하거나 exec로 교체할 때 실행 파일의 쓰기 금지를 해제한다. */
+	if (curr->running_file != NULL) {
+		lock_acquire (&filesys_lock);
+		file_close (curr->running_file);
+		curr->running_file = NULL;
+		lock_release (&filesys_lock);
+	}
 }
 
 /* Sets up the CPU for running user code in the nest thread.
@@ -414,6 +435,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
+	bool filesys_locked = false;
 	int i;
 
 	char *argv[128];
@@ -432,11 +454,15 @@ load (const char *file_name, struct intr_frame *if_) {
 	}	
 
 	/* Open executable file. */
+	lock_acquire (&filesys_lock);
+	filesys_locked = true;
 	file = filesys_open (argv[0]);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", argv[0]);
 		goto done;
 	}
+	/* 로딩 중부터 실행이 끝날 때까지 파일 내용이 바뀌지 않게 한다. */
+	file_deny_write (file);
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -573,7 +599,13 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	if (filesys_locked) {
+		if (success)
+			t->running_file = file;
+		else
+			file_close (file);
+		lock_release (&filesys_lock);
+	}
 	return success;
 }
 

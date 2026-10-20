@@ -104,7 +104,7 @@ struct child_status {
 	struct semaphore fork_done;        /* 자원 복제 완료 알림. fork. */
 	struct semaphore exit_done;        /* 자식 종료 알림. exit · wait. */
 
-	
+
 	struct list_elem elem;             /* 부모의 자식 상태 목록에 연결. fork · wait. */
 
 	int ref_count;                     /* 부모와 자식이 보유한 참조 수. exit · wait. */
@@ -143,6 +143,9 @@ struct thread {
 	int next_fd;                        /* 다음에 줄 fd 번호. fd. */
 	struct file *running_file;          /* 실행 중인 내 프로그램 파일. 쓰기 금지용. rox. */
 	struct intr_frame fork_if;          /* fork 시점 사용자 레지스터 */
+
+	bool fork_success; 					/* 이번 fork의 자원 복제 결과 */
+	struct semaphore fork_done;			/* 이번 fork의 복제 완료 알림 */
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
