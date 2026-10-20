@@ -20,6 +20,7 @@
 #include "intrinsic.h"
 #include "devices/timer.h"
 #include "threads/malloc.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -82,10 +83,15 @@ initd (void *f_name) {
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+process_fork (const char *name, struct intr_frame *if_) {
+	struct thread *parent = thread_current ();
+
+	/* 스케줄링용 tf와 구분하여 자식이 이어갈 사용자 실행 상태를 보관한다. */
+	parent->fork_if = *if_; /* 부모 */
+
 	/* Clone current thread to new thread.*/
 	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+			PRI_DEFAULT, __do_fork, parent);
 }
 
 #ifndef VM
@@ -100,21 +106,32 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (is_kernel_vaddr(va)) return true;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
+	if (parent_page == NULL) return false;
+
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page (PAL_USER);
+
+	if (newpage == NULL) return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy(newpage, parent_page, PGSIZE);
+
+	writable = (*pte & PTE_W) != 0;
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
-		/* 6. TODO: if fail to insert page, do error handling. */
+
+	/* 6. TODO: if fail to insert page, do error handling. */
+
 	}
 	return true;
 }
@@ -126,44 +143,29 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
-	/* aux 에는 부모스레드의 주소가 들어가 있음 */
+	/* thread_create의 마지막 인자로 전달한 부모 TCB를 받는다. */
 	struct intr_frame if_;
 	struct thread *parent = (struct thread *) aux;
 	struct thread *current = thread_current ();
+	bool succ = true;
 
 	ASSERT (parent != NULL);
 	ASSERT (current->fd_table == NULL);
 	ASSERT (current->running_file == NULL);
-	
+
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	/* 1. 부모의 사용자 레지스터 복사 */
-    if_ = parent->fork_if;
-    if_.R.rax = 0;  /* 자식의 fork 반환값 */
+	/*  부모의 process_fork(): */
+
 	
-	current->pml4 = pml4_create ();
-	if (current->pml4 == NULL)
-		goto error;
-
-	process_activate (current);
-
-
-	/* 부모와 자식이 서로 다른 물리 페이지를 사용하도록 복제한다. */
-	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
-		goto error;
-
-	/* 부분 복제에 실패해도 열린 항목만 정리할 수 있도록 비워 둔다. */
-	current->fd_table = malloc (sizeof *current->fd_table * FD_MAX);
-	if (current->fd_table == NULL)
-		goto error;
-
-	struct intr_frame *parent_if;
-	bool succ = true;
-
 	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+	/* 자식의 커널 스택에 복사해 사용자 모드 복귀 시 레지스터를 복원한다. */
+	/* 부모의 *if_ → parent->fork_if → 자식의 if_ */
+	/* fork의 자식 반환값은 사용자 모드에서 rax를 통해 전달된다. */
+	memcpy (&if_, &parent->fork_if, sizeof (struct intr_frame)); /* 자식 */
+	if_.R.rax = 0;
 
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create();
+	current->pml4 = pml4_create ();
 	if (current->pml4 == NULL)
 		goto error;
 
@@ -182,12 +184,50 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
+	current->fd_table = calloc(FD_MAX, sizeof *current->fd_table);
 
+	if (current->fd_table == NULL)
+		goto error;
+
+	current->next_fd = parent->next_fd;
+
+	/* 파일 시스템 락 획득; */
+	lock_acquire(&filesys_lock);
+
+	if (parent->fd_table != NULL) {
+		for (int fd = 2; fd < FD_MAX; fd++) {
+			if (parent->fd_table[fd] == NULL)
+				continue;
+
+			current->fd_table[fd] =
+				file_duplicate(parent->fd_table[fd]);
+
+			if (current->fd_table[fd] == NULL) {
+				// 파일 시스템 락 해제;
+				lock_release(&filesys_lock);
+				goto error;
+			}
+		}
+	}
+
+	if (parent->running_file != NULL) {
+		current->running_file =
+			file_duplicate(parent->running_file);
+
+		if (current->running_file == NULL) {
+			// 파일 시스템 락 해제;
+			lock_release(&filesys_lock);
+			goto error;
+		}
+	}
+
+	// 파일 시스템 락 해제;
+	lock_release(&filesys_lock);
 	process_init ();
 
 	/* Finally, switch to the newly created process. */
-	if (succ)
 	/* do iret 은 사용자 프로그램으로 실행을 전환 하는 함수*/
+	if (succ)
 		do_iret (&if_);
 error:
 	thread_exit ();

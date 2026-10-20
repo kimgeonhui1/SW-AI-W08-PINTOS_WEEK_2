@@ -23,7 +23,7 @@ void halt(void);
 void exit(int status);
 int write(int fd, const void *buffer, unsigned size);
 
-tid_t fork (const char *thread_name, struct intr_frame *f);
+static tid_t sys_fork (const char *thread_name, struct intr_frame *f);
 int exec (const char *cmd_line);
 int wait (tid_t pid);
 
@@ -87,7 +87,7 @@ syscall_handler (struct intr_frame *f) {
 
         // 인자 2개 (const char *thread_name, struct intr_frame *f)
         case SYS_FORK:
-            f->R.rax = fork((const char *)f->R.rdi, f);
+            f->R.rax = sys_fork ((const char *) f->R.rdi, f);
             break;
 
         // 인자 1개 (const char *cmd_line)
@@ -233,7 +233,12 @@ int write(int fd, const void *buffer, unsigned size){
 	return -1;
 }
 
-tid_t fork (const char *thread_name, struct intr_frame *f) { return -1; }
+/* 이름을 읽기 전에 검증하고 시스템 콜 진입 시점의 사용자 프레임을 넘긴다. */
+static tid_t
+sys_fork (const char *thread_name, struct intr_frame *f) {
+	check_addr_byte ((char *) thread_name);
+	return process_fork (thread_name, f);
+}
 int exec (const char *cmd_line) { return -1; }
 int wait (tid_t pid) { 
 	// if(!is_my_direct_child(pid)) return -1;
