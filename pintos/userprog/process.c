@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 #include "devices/timer.h"
+#include "threads/malloc.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -125,10 +126,36 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
+	/* aux 에는 부모스레드의 주소가 들어가 있음 */
 	struct intr_frame if_;
 	struct thread *parent = (struct thread *) aux;
 	struct thread *current = thread_current ();
+
+	ASSERT (parent != NULL);
+	ASSERT (current->fd_table == NULL);
+	ASSERT (current->running_file == NULL);
+	
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
+	/* 1. 부모의 사용자 레지스터 복사 */
+    if_ = parent->fork_if;
+    if_.R.rax = 0;  /* 자식의 fork 반환값 */
+	
+	current->pml4 = pml4_create ();
+	if (current->pml4 == NULL)
+		goto error;
+
+	process_activate (current);
+
+
+	/* 부모와 자식이 서로 다른 물리 페이지를 사용하도록 복제한다. */
+	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
+		goto error;
+
+	/* 부분 복제에 실패해도 열린 항목만 정리할 수 있도록 비워 둔다. */
+	current->fd_table = malloc (sizeof *current->fd_table * FD_MAX);
+	if (current->fd_table == NULL)
+		goto error;
+
 	struct intr_frame *parent_if;
 	bool succ = true;
 

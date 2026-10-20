@@ -39,7 +39,6 @@
    - down or "P": wait for the value to become positive, then
    decrement it.
 
-   - up or "V": increment the value (and wake up one waiting
    thread, if any). */
 bool cond_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
 bool donate_priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
