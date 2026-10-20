@@ -223,13 +223,29 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
-	/* Add to run queue. */
-	thread_unblock (t);
-	priority_thread_yield();
+	// FDT 메모리 할당 
+	
+    t->fdt = palloc_get_page (PAL_ZERO);
+    
+	// 예외 처리 
+	if (t->fdt == NULL) {
+        palloc_free_page (t);
+        return TID_ERROR;
+    }
 
-	return tid;
+    // 0(stdin), 1(stdout)에 값을 넣어 있음을 알림
+	t->fdt[0] = (struct file *) 1;
+    t->fdt[1] = (struct file *) 2;
+    
+	// next_fd 설정 (fdt[0], fdt[1]은 했으니 다음은 2)
+    t->next_fd = 2;
+
+    /* Add to run queue. */
+    thread_unblock (t);
+    priority_thread_yield ();
+
+    return tid;
 }
-
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
 
