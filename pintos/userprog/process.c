@@ -152,8 +152,8 @@ static void
 __do_fork (void *aux) {
 	/* thread_create의 마지막 인자로 전달한 부모 TCB를 받는다. */
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
+	struct thread *parent = (struct thread *) aux;	 /* 부모 */
+	struct thread *current = thread_current (); 	 /* 자식 */
 	bool succ = true;
 
 	ASSERT (parent != NULL);
@@ -169,10 +169,10 @@ __do_fork (void *aux) {
 	/* 부모의 *if_ → parent->fork_if → 자식의 if_ */
 	/* fork의 자식 반환값은 사용자 모드에서 rax를 통해 전달된다. */
 	memcpy (&if_, &parent->fork_if, sizeof (struct intr_frame)); /* 자식 */
-	if_.R.rax = 0;
+	if_.R.rax = 0;	/* return 값 0으로 설정 */
 
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create ();
+	current->pml4 = pml4_create ();	/* 자식용 pml4(주소지도) 생성 */
 	if (current->pml4 == NULL)
 		goto error;
 
