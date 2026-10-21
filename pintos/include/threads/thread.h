@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "threads/interrupt.h"
 #include "threads/synch.h"
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -133,6 +134,19 @@ struct thread {
 	struct list_elem allelem;          /* 전체 스레드 목록에 연결. */
 
 	int status_exit;                   /* 종료 상태. 기본값 -1. */
+
+	struct file **fdt;					// fdt 정의
+	int next_fd;						// 다음 FD
+
+	// wait()을 위한 thread 확장
+	// struct list child_list;				// 자식 리스트
+	// struct list_elem child_elem;		// 자식 리스트에 들어가기 위함
+	
+	// struct semaphore wait_sema;			// 자식이 종료될 때까지 부모가 잠들 semaphore	
+	// struct semaphore free_sema;         // 자식이 free 되기 전 부모가 자식의(나의) 종료코드를 읽을때 까지 잠들 semaphore
+
+	
+	// struct file *running_file;			// 실행중인 파일을 가리키는 포인터
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
