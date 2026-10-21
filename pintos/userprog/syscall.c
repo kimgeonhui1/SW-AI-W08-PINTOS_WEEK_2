@@ -246,6 +246,7 @@ sys_fork (const char *thread_name, struct intr_frame *f) {
 	return process_fork (thread_name, f);
 }
 int exec (const char *cmd_line) { return -1; }
+
 int wait (tid_t pid) { 
 	// if(!is_my_direct_child(pid)) return -1;
 
