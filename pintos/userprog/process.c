@@ -157,7 +157,7 @@ __do_fork (void *aux) {
 	bool succ = true;
 
 	ASSERT (parent != NULL);
-	ASSERT (current->fd_table == NULL);
+	ASSERT (current->fdt != NULL);  /* 테이블이 준비되어 있어야 함 */
 	ASSERT (current->running_file == NULL);
 
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
@@ -191,25 +191,21 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-	current->fd_table = calloc(FD_MAX, sizeof *current->fd_table);
-
-	if (current->fd_table == NULL)
-		goto error;
-
+	/* thread_create()가 할당한 fdt에 부모의 열린 파일을 복제한다. */
 	current->next_fd = parent->next_fd;
 
 	/* 파일 시스템 락 획득; */
 	lock_acquire(&filesys_lock);
 
-	if (parent->fd_table != NULL) {
+	if (parent->fdt != NULL) {
 		for (int fd = 2; fd < FD_MAX; fd++) {
-			if (parent->fd_table[fd] == NULL)
+			if (parent->fdt[fd] == NULL)
 				continue;
 
-			current->fd_table[fd] =
-				file_duplicate(parent->fd_table[fd]);
+			current->fdt[fd] =
+				file_duplicate(parent->fdt[fd]);
 
-			if (current->fd_table[fd] == NULL) {
+			if (current->fdt[fd] == NULL) {
 				// 파일 시스템 락 해제;
 				lock_release(&filesys_lock);
 				goto error;
@@ -318,15 +314,17 @@ process_exit (void) {
 
 	// 열려 있는 모든 파일 닫기
 	if (curr->fdt != NULL) {
+		lock_acquire (&filesys_lock);
 		// fd = 0은 stdin(표준 입력),  fd = 1은 stdout(표준 출력)이기에 fd=2부터
 		// 1페이지는 4KB 이기에 포인터는 8바이트이기에 4096 / 8 = 512이니, 2~511까지 순회
-        for (int fd = 2; fd < 512; fd++) {
+        for (int fd = 2; fd < FD_MAX; fd++) {
 			struct file *file = curr->fdt[fd];   
 			if (file != NULL) {            
 				file_close (file);
 				curr->fdt[fd] = NULL;
             }
         }
+		lock_release (&filesys_lock);
         // FDT 페이지 메모리 해제
         palloc_free_page (curr->fdt);
         curr->fdt = NULL;
