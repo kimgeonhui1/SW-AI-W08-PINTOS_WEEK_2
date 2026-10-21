@@ -599,7 +599,6 @@ init_thread (struct thread *t, const char *name, int priority) {
 #ifdef USERPROG
 	t->as_child = NULL;
 	t->status_exit = -1;
-	t->fd_table = NULL;
 	t->next_fd = 2;
 	t->running_file = NULL;
 

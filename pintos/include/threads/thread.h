@@ -31,7 +31,7 @@ typedef int tid_t;
 #define PRI_MAX 63                      /* Highest priority. */
 
 #ifdef USERPROG
-#define FD_MAX 128                      /* 프로세스 FD 테이블의 항목 수. fd · fork. */
+#define FD_MAX 512	                    /* 프로세스 FD 테이블의 항목 수. fd · fork. */
 #endif
 
 bool priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
@@ -153,8 +153,6 @@ struct thread {
 	uint64_t *pml4;                     /* Page map level 4 */
 	struct list children;               /* 직계 자식들의 child_status 목록. fork · wait. */
 	struct child_status *as_child;      /* 내 부모와 공유하는 내 상태. fork · exit · wait. */
-	struct file 	**fd_table;         /* fd 번호 → 열린 파일. fd 0 · 1 은 콘솔용으로 비움. fd. */
-	int next_fd;                        /* 다음에 줄 fd 번호. fd. */
 	struct file *running_file;          /* 실행 중인 내 프로그램 파일. 쓰기 금지용. rox. */
 	struct intr_frame fork_if;          /* fork 시점 사용자 레지스터 */
 

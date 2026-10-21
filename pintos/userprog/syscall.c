@@ -221,7 +221,7 @@ int write(int fd, const void *buffer, unsigned size){
 		putbuf((char *)buffer, size);
 		return size;
 	}
-	else if (fd <= 0 || fd >= 512){
+	else if (fd <= 0 || fd >= FD_MAX){
 		return -1;
 	}
     else{
@@ -290,7 +290,7 @@ int open (const char *file) {
     int allocate_fd = -1;
 
     // 비어있는 슬롯 찾기
-    for (int fd = 2; fd < 512; fd++) {
+    for (int fd = 2; fd < FD_MAX; fd++) {
         struct file *file = curr->fdt[fd];   
 			if (file == NULL) {            
 				curr->fdt[fd] = f;
@@ -311,7 +311,7 @@ int open (const char *file) {
 int filesize (int fd) { 
     struct thread * curr = thread_current();
 
-    if ( fd < 2 || fd >= 512 || curr->fdt[fd] == NULL) return -1;
+    if ( fd < 2 || fd >= FD_MAX || curr->fdt[fd] == NULL) return -1;
 
     lock_acquire(&filesys_lock);
 
@@ -341,7 +341,7 @@ int read (int fd, void *buffer, unsigned size) {
     }
 
     // 잘못된 접근
-    else if(fd < 2 || fd >= 512) return -1;
+    else if(fd < 2 || fd >= FD_MAX) return -1;
     
     else{
         struct file *file = curr->fdt[fd];
@@ -359,7 +359,7 @@ int read (int fd, void *buffer, unsigned size) {
 }
 
 void seek (int fd, unsigned position) {
-    if (fd < 2 || fd >= 512) return;
+    if (fd < 2 || fd >= FD_MAX) return;
 
     struct thread *curr = thread_current();
     struct file *file = curr->fdt[fd];
@@ -374,7 +374,7 @@ void seek (int fd, unsigned position) {
 }
 
 unsigned tell (int fd) { 
-    if (fd < 2 || fd >= 512) return -1;
+    if (fd < 2 || fd >= FD_MAX) return -1;
 
     struct thread *curr = thread_current();
     struct file *file = curr->fdt[fd];
@@ -390,7 +390,7 @@ unsigned tell (int fd) {
 }
 
 void close (int fd) {
-    if (fd < 0 || fd == 0 || fd == 1 || fd >= 512) return;
+    if (fd < 0 || fd == 0 || fd == 1 || fd >= FD_MAX) return;
 
     struct thread *curr = thread_current();
 
