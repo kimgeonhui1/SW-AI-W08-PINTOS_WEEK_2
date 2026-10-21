@@ -35,6 +35,10 @@ static void
 process_init (void) {
 	struct thread *current = thread_current ();
 }
+struct initd_arg {
+    char *fn_copy;
+    struct child_status *cs;
+};
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
@@ -43,27 +47,56 @@ process_init (void) {
  * Notice that THIS SHOULD BE CALLED ONCE. */
 tid_t
 process_create_initd (const char *file_name) {
-	char *fn_copy;
-	tid_t tid;
+    char *fn_copy;
+    tid_t tid;
 
-	/* Make a copy of FILE_NAME.
-	 * Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page (0);
-	if (fn_copy == NULL)
-		return TID_ERROR;
-	strlcpy (fn_copy, file_name, PGSIZE);
+    fn_copy = palloc_get_page (0);
+    if (fn_copy == NULL)
+        return TID_ERROR;
+    strlcpy (fn_copy, file_name, PGSIZE);
 
-	// file_name에서 파일명만 잘라서 줘야 함
-	char cut_file_name[16];
-	char *save_ptr;
-	strlcpy(cut_file_name, file_name, sizeof(cut_file_name));
-	char * only_file_name = strtok_r(cut_file_name, " ", &save_ptr);
+    char cut_file_name[16];
+    char *save_ptr;
+    strlcpy (cut_file_name, file_name, sizeof (cut_file_name));
+    char *only_file_name = strtok_r (cut_file_name, " ", &save_ptr);
 
-	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (only_file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
-		palloc_free_page (fn_copy);
-		return tid;
+    /* 1. 성적표 할당 및 초기화 (tid는 아직 모름) */
+    struct child_status *cs = malloc (sizeof (struct child_status));
+    if (cs == NULL) {
+        palloc_free_page (fn_copy);
+        return TID_ERROR;
+    }
+    cs->exit_status = -1;
+    sema_init (&cs->exit_done, 0);
+
+    /* 2. initd로 넘길 인자 구조체 생성 */
+    struct initd_arg *arg = malloc (sizeof (struct initd_arg));
+    if (arg == NULL) {
+        palloc_free_page (fn_copy);
+        free (cs);
+        return TID_ERROR;
+    }
+    arg->fn_copy = fn_copy;
+    arg->cs = cs;
+
+    /* 3. 부모 리스트에 성적표 등록 */
+    list_push_back (&thread_current ()->children, &cs->elem);
+
+    /* 4. 스레드 생성 (여기서 tid가 3으로 결정됨) */
+    tid = thread_create (only_file_name, PRI_DEFAULT, initd, arg);
+    if (tid == TID_ERROR) {
+        list_remove (&cs->elem);
+        palloc_free_page (fn_copy);
+        free (cs);
+        free (arg);
+        return TID_ERROR;
+    }
+
+    /* 5. 중요: thread_create가 끝난 '직후'에 발급된 tid를 성적표에 기록! */
+    cs->tid = tid;
+
+    /* 6. 중요: 반드시 tid(3)를 리턴해야 init.c가 3번을 기다림! */
+    return tid;
 }
 
 /* A thread function that launches first user process. */
@@ -73,12 +106,22 @@ initd (void *f_name) {
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
 
-	process_init ();
+	/* 전달받은 인자 풀기 */
+    struct initd_arg *arg = (struct initd_arg *) f_name;
+    struct thread *curr = thread_current ();
 
-	if (process_exec (f_name) < 0)
-		PANIC("Fail to launch initd\n");
-	NOT_REACHED ();
+    /* 성적표 바로 연결 */
+    curr->as_child = arg->cs;
+    char *fn_copy = arg->fn_copy;
+    free (arg); /* 포장지 메모리 해제 */
+
+    process_init ();
+
+    if (process_exec (fn_copy) < 0)
+        PANIC ("Fail to launch initd\n");
+    NOT_REACHED ();
 }
+
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
