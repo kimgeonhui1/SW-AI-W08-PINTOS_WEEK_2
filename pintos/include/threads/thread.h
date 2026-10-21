@@ -30,6 +30,10 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+#ifdef USERPROG
+#define FD_MAX 128                      /* 프로세스 FD 테이블의 항목 수. fd · fork. */
+#endif
+
 bool priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
 void priority_thread_yield(void);
 
@@ -90,6 +94,25 @@ void priority_thread_yield(void);
  * only because they are mutually exclusive: only a thread in the
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
+
+#ifdef USERPROG
+/* 자식 TCB가 해제된 뒤에도 부모가 복제 결과와 종료 상태를 확인한다. */
+struct child_status {
+	tid_t tid;                         /* 자식의 식별 번호. fork · wait. */
+	int exit_status;                   /* 자식의 종료 코드. exit · wait. */
+	bool fork_success;                 /* 자원 복제 성공 여부. fork. */
+
+	struct semaphore fork_done;        /* 자원 복제 완료 알림. fork. */
+	struct semaphore exit_done;        /* 자식 종료 알림. exit · wait. */
+
+
+	struct list_elem elem;             /* 부모의 자식 상태 목록에 연결. fork · wait. */
+
+	int ref_count;                     /* 부모와 자식이 보유한 참조 수. exit · wait. */
+	struct lock ref_lock;              /* 참조 수 변경을 보호하는 락. exit · wait. */
+};
+#endif
+
 struct thread {
 	/* Owned by thread.c. */
 	tid_t tid;                          /* Thread identifier. */
@@ -98,19 +121,19 @@ struct thread {
 	int priority;                       /* Priority. */
 
 	/* Shared between thread.c and synch.c. */
-	struct list_elem elem;
-	struct list_elem sleep_elem;		/* List element(연결 리스트 형태). */
+	struct list_elem elem;              /* List element. */
+	struct list_elem sleep_elem;        /* 알람 대기 목록에 연결. */
 
-	int my_priority;					// 내 우선순위 보존용
-	struct list donation_list;			// 기부받은 스레드 목록
-	struct lock *lock_to_stop;			// 어떤 lock때문에 멈춰 있는지
-	struct list_elem donation_elem;		// 다른 스레드의 기부해준 스레드 목록에 들어가기 위함 
+	int my_priority;                   /* 우선순위 기부 전 원래 우선순위. */
+	struct list donation_list;         /* 기부받은 스레드 목록. */
+	struct lock *lock_to_stop;          /* 획득을 기다리는 락. */
+	struct list_elem donation_elem;    /* 락 소유자의 기부 목록에 연결. */
 
-	int nice;							// nice 정의 (다른 스레드에게 얼마나 양보적인지)(범위는 -20 ~ 20)
-	int recent_cpu;						// recent_cpu 정의 (각 프로세스가 최근에 cpu 시간을 얼마나 사용했는지)
-	struct list_elem allelem;			// all_list에 넣기 위함
+	int nice;                          /* MLFQS nice 값. */
+	int recent_cpu;                    /* MLFQS CPU 사용량. */
+	struct list_elem allelem;          /* 전체 스레드 목록에 연결. */
 
-	int status_exit;					// 종료 상태 정의
+	int status_exit;                   /* 종료 상태. 기본값 -1. */
 
 	struct file **fdt;					// fdt 정의
 	int next_fd;						// 다음 FD
@@ -128,18 +151,26 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
+	struct list children;               /* 직계 자식들의 child_status 목록. fork · wait. */
+	struct child_status *as_child;      /* 내 부모와 공유하는 내 상태. fork · exit · wait. */
+	struct file 	**fd_table;         /* fd 번호 → 열린 파일. fd 0 · 1 은 콘솔용으로 비움. fd. */
+	int next_fd;                        /* 다음에 줄 fd 번호. fd. */
+	struct file *running_file;          /* 실행 중인 내 프로그램 파일. 쓰기 금지용. rox. */
+	struct intr_frame fork_if;          /* fork 시점 사용자 레지스터 */
+
+	bool fork_success; 					/* 이번 fork의 자원 복제 결과 */
+	struct semaphore fork_done;			/* 이번 fork의 복제 완료 알림 */
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
 #endif
-	int64_t timer_tick;
+	int64_t timer_tick;                 /* 알람에서 깨어날 tick. */
 
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
 };
-
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
