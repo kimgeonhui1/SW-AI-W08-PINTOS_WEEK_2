@@ -14,6 +14,8 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "devices/input.h"
+#include "threads/palloc.h"
+
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -245,9 +247,23 @@ sys_fork (const char *thread_name, struct intr_frame *f) {
 	check_addr_byte ((char *) thread_name);
 	return process_fork (thread_name, f);
 }
-int exec (const char *cmd_line) { return -1; }
+int exec (const char *cmd_line) { 
+    check_addr_byte((char *)cmd_line);
+
+    // 4KB의 페이지 할당 및 인자로 받은 cmd_line(파일명 + 인자로 이뤄진 문자열) 살리기 위한 공간 할당 
+    // process_exec()함수에서 process_cleanup()이 실행하면 인자로 받은 cmd_line(파일명 + 인자로 이루어진 문자열)이 없어짐
+    char *cmd_line_copy = palloc_get_page(PAL_ZERO);
+    if(cmd_line_copy == NULL) return -1;
+
+    // 할당받은 공간에 cmd_line(파일명) 넣기
+    strlcpy (cmd_line_copy, cmd_line, PGSIZE);
+
+    // process_exec(cmd_line_copy) 실행 및 반환값이 -1이면(오류 발생 시) 강제 종료
+    if (process_exec(cmd_line_copy) == -1) exit(-1);
+
+    NOT_REACHED(); 
+}
 int wait (tid_t pid) { 
-	// if(!is_my_direct_child(pid)) return -1;
 
 	return process_wait(pid);
 }

@@ -98,17 +98,19 @@ void priority_thread_yield(void);
 #ifdef USERPROG
 /* 자식 TCB가 해제된 뒤에도 부모가 복제 결과와 종료 상태를 확인한다. */
 struct child_status {
-	tid_t tid;                         /* 자식의 식별 번호. fork · wait. */
+	tid_t tid;                         /* 자식의 식별 번호(자식의 ID). fork · wait. */ 
 	int exit_status;                   /* 자식의 종료 코드. exit · wait. */
 	bool fork_success;                 /* 자원 복제 성공 여부. fork. */
 
-	struct semaphore fork_done;        /* 자원 복제 완료 알림. fork. */
+	struct semaphore fork_done;        /* 자원 복제(fork) 완료 알림. fork. */
 	struct semaphore exit_done;        /* 자식 종료 알림. exit · wait. */
 
 
 	struct list_elem elem;             /* 부모의 자식 상태 목록에 연결. fork · wait. */
 
-	int ref_count;                     /* 부모와 자식이 보유한 참조 수. exit · wait. */
+	// 자식과 부모 둘 다 살아있을 때는 ref_count = 2
+	// 자식이나 부모가 죽으면 ref_count -- 되며, ref_count = 0이 되면 child_status을 free()
+	int ref_count;                     /* 부모와 자식이 보유한 참조 수. exit · wait. */ 
 	struct lock ref_lock;              /* 참조 수 변경을 보호하는 락. exit · wait. */
 };
 #endif
@@ -138,15 +140,6 @@ struct thread {
 	struct file **fdt;					// fdt 정의
 	int next_fd;						// 다음 FD
 
-	// wait()을 위한 thread 확장
-	// struct list child_list;				// 자식 리스트
-	// struct list_elem child_elem;		// 자식 리스트에 들어가기 위함
-	
-	// struct semaphore wait_sema;			// 자식이 종료될 때까지 부모가 잠들 semaphore	
-	// struct semaphore free_sema;         // 자식이 free 되기 전 부모가 자식의(나의) 종료코드를 읽을때 까지 잠들 semaphore
-
-	
-	// struct file *running_file;			// 실행중인 파일을 가리키는 포인터
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

@@ -36,6 +36,12 @@ process_init (void) {
 	struct thread *current = thread_current ();
 }
 
+
+struct thread_create_aux{
+	struct child_status *cs;
+	char *fn_copy;
+};
+
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
  * before process_create_initd() returns. Returns the initd's
@@ -48,9 +54,23 @@ process_create_initd (const char *file_name) {
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
+
+	// 자식의 상태를 기록할 공간 할당 및 부모의 children 리스트에 추가
+	struct child_status *cs = malloc (sizeof (struct child_status));
+	if (cs == NULL) return TID_ERROR; 
+
+    cs->exit_status = -1;            
+    sema_init(&cs->exit_done, 0);     
+
+
+	list_push_back (&thread_current()->children, &cs->elem);
+
 	fn_copy = palloc_get_page (0);
-	if (fn_copy == NULL)
+	if (fn_copy == NULL){
+		list_remove(&cs->elem);
+		free(cs);
 		return TID_ERROR;
+	}
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	// file_name에서 파일명만 잘라서 줘야 함
@@ -59,10 +79,30 @@ process_create_initd (const char *file_name) {
 	strlcpy(cut_file_name, file_name, sizeof(cut_file_name));
 	char * only_file_name = strtok_r(cut_file_name, " ", &save_ptr);
 
+	struct thread_create_aux *aux = malloc(sizeof(struct thread_create_aux));
+	if(aux == NULL){
+		palloc_free_page(fn_copy);
+		list_remove(&cs->elem);
+		free(cs);
+		return TID_ERROR;
+	}
+
+	aux -> fn_copy = fn_copy;
+	aux -> cs = cs;
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (only_file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
+	// thread_create(스레드(파일)명, 우선순위, 바로 실행할 함수, 바로 실행할 함수에 전달할 인자)
+	tid = thread_create (only_file_name, PRI_DEFAULT, initd, aux);
+	if (tid == TID_ERROR){
 		palloc_free_page (fn_copy);
+		list_remove(&cs->elem);
+		free(cs);
+		free(aux);
+		return tid;
+	}
+
+	cs -> tid = tid;
+
 	return tid;
 }
 
@@ -73,10 +113,20 @@ initd (void *f_name) {
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
 
-	process_init ();
+	struct thread_create_aux *aux = f_name;
 
-	if (process_exec (f_name) < 0)
+	char *fn_copy = aux->fn_copy;
+
+	thread_current()->as_child = aux->cs;
+
+	free(aux);
+
+	// 기본 환경 구축(초기값 세팅)
+	process_init ();
+	// 인자로 받은 파일명을 디스크에 찾아 메모리에 적재/실행
+	if (process_exec (fn_copy) < 0)
 		PANIC("Fail to launch initd\n");
+	// 에러 발생
 	NOT_REACHED ();
 }
 
@@ -86,18 +136,46 @@ tid_t
 process_fork (const char *name, struct intr_frame *if_) {
 	struct thread *parent = thread_current ();
 
+	/* 1. 자식의 상태를 보관할 공간 할당 */
+	struct child_status *cs = malloc (sizeof (struct child_status));
+	if (cs == NULL)
+		return TID_ERROR;
+
+	/* 2. 할당한 공간에 child_status 구조체의 초기값 지정 */
+	cs->tid = TID_ERROR;
+	cs->exit_status = -1;
+	cs->fork_success = false;
+	sema_init (&cs->fork_done, 0);
+	sema_init (&cs->exit_done, 0);
+	cs->ref_count = 2; // 부모(1) + 자식(1)
+	lock_init (&cs->ref_lock);
+
+	/* 3. 부모의 children 필드에 저장 */
+	list_push_back (&parent->children, &cs->elem);
+
 	/* 스케줄링용 tf와 구분하여 자식이 이어갈 사용자 실행 상태를 보관한다. */
 	parent->fork_if = *if_; /* 부모 */
 	parent->fork_success=false;
 
+	// 자식 스레드 생성(__do_fork 실행) 
 	tid_t tid= thread_create (name,	PRI_DEFAULT, __do_fork, parent);
 
-	if (tid==TID_ERROR) return TID_ERROR;
-	
+	// 스레드 생성이 실패한 경우, 등록했던 child_status 제거 및 free
+	if (tid==TID_ERROR) {
+		list_remove(&cs->elem);
+		free(cs);
+		return TID_ERROR;
+	}
+	cs->tid = tid;
+
 	sema_down(&parent->fork_done);
 
-	if(!parent->fork_success) return TID_ERROR;
-
+	// 자식의 복제 작업이 실패한 경우, 등록했던 child_status 제거 및 메모리 해제
+	if(!parent->fork_success) {
+		list_remove(&cs->elem);
+		free(cs);
+		return TID_ERROR;
+	}
 	return tid;
 }
 
@@ -163,6 +241,16 @@ __do_fork (void *aux) {
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
 	/*  부모의 process_fork(): */
 
+
+	struct list_elem *e;
+	// 부모의 children 리스트를 돌면서 내 tid와 일치하는 child_status를 찾아 내 as_child에 저장 (process_fork에서 만든 초기값을 가져옴)
+	for (e = list_begin (&parent->children); e != list_end (&parent->children); e = list_next (e)) {
+        struct child_status *cs = list_entry (e, struct child_status, elem);
+        if (cs->tid == current->tid) {
+            current->as_child = cs;
+            break;
+        }
+    }
 
 	/* 1. Read the cpu context to local stack. */
 	/* 자식의 커널 스택에 복사해 사용자 모드 복귀 시 레지스터를 복원한다. */
@@ -258,6 +346,7 @@ process_exec (void *f_name) {
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
 	/* We first kill the current context */
+	// 기존 메모리 해제
 	process_cleanup ();
 
 	// rsp로 스택 공간 확장 (argv를 돌면서 문자열 길이(strlen() + 1(/0)))
@@ -266,9 +355,11 @@ process_exec (void *f_name) {
 
 
 	/* And then load the binary */
+	// 새 binary load 및 인자 스택 setting
 	success = load (file_name, &_if);
 
 	/* If load failed, quit. */
+	// 커널 복사본 메모리 해제
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
@@ -290,12 +381,34 @@ process_exec (void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) {
+process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
 	// while(1);
-	timer_sleep(100);
+	// timer_sleep(100);
+
+	struct thread * curr = thread_current();
+	struct list_elem *e;
+
+
+	for (e = list_begin (&curr->children); e != list_end (&curr->children); e = list_next (e)) {
+        struct child_status *cs = list_entry (e, struct child_status, elem);
+        if (cs->tid == child_tid) {
+			// 자식 프로세스가 종료될 때 까지(죽을때 까지) 대기
+			sema_down (&cs->exit_done);
+
+			// 자식의 종료 상태 코드 가져오기
+			int status = cs->exit_status;
+			// 부모의 child 리스트에서 제거 및 free()
+			list_remove (&cs->elem);
+			free(cs);
+
+			// 자식의 종료 상태 반환
+			return status;
+        }
+    }
+
 	return -1;
 }
 
@@ -312,9 +425,10 @@ process_exit (void) {
     	printf ("%s: exit(%d)\n", curr->name, curr->status_exit);
 	}
 
-	// 열려 있는 모든 파일 닫기
+	lock_acquire (&filesys_lock);
+
+	// fdt 정리(닫기)
 	if (curr->fdt != NULL) {
-		lock_acquire (&filesys_lock);
 		// fd = 0은 stdin(표준 입력),  fd = 1은 stdout(표준 출력)이기에 fd=2부터
 		// 1페이지는 4KB 이기에 포인터는 8바이트이기에 4096 / 8 = 512이니, 2~511까지 순회
         for (int fd = 2; fd < FD_MAX; fd++) {
@@ -324,13 +438,27 @@ process_exit (void) {
 				curr->fdt[fd] = NULL;
             }
         }
-		lock_release (&filesys_lock);
         // FDT 페이지 메모리 해제
         palloc_free_page (curr->fdt);
         curr->fdt = NULL;
     }
 
+	// 쓰기 금지 해제
+	if (curr->running_file != NULL) {
+        file_close (curr->running_file);
+        curr->running_file = NULL;
+    }
 
+    lock_release (&filesys_lock);
+
+	if(curr->as_child != NULL){
+		// 자식 프로세스가 종료되면 의 thread는 사라짐
+		// 때문에 자식 프로세스의 종료 상태를 남겨놓기 위해(부모 프로세스가 자식의 작업의 성공 여부에 따라 다음 동작을 결정하기에)
+		// 사라지지 않은 구조체인 child_status의 exit_status에 자식 프로세스의 종료 상태인 status_exit를 백업해 둠
+		curr->as_child->exit_status = curr->status_exit;
+		// 부모 프로세스 깨우기
+		sema_up(&curr->as_child->exit_done);
+	}
 
 	process_cleanup ();
 }
