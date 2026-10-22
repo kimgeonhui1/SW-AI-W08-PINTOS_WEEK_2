@@ -264,7 +264,6 @@ int exec (const char *cmd_line) {
     NOT_REACHED(); 
 }
 int wait (tid_t pid) { 
-	// if(!is_my_direct_child(pid)) return -1;
 
 	return process_wait(pid);
 }

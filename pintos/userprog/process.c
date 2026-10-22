@@ -36,6 +36,12 @@ process_init (void) {
 	struct thread *current = thread_current ();
 }
 
+
+struct thread_create_aux{
+	struct child_status *cs;
+	char *fn_copy;
+};
+
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
  * before process_create_initd() returns. Returns the initd's
@@ -48,9 +54,23 @@ process_create_initd (const char *file_name) {
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
+
+	// 자식의 상태를 기록할 공간 할당 및 부모의 children 리스트에 추가
+	struct child_status *cs = malloc (sizeof (struct child_status));
+	if (cs == NULL) return TID_ERROR; 
+
+    cs->exit_status = -1;            
+    sema_init(&cs->exit_done, 0);     
+
+
+	list_push_back (&thread_current()->children, &cs->elem);
+
 	fn_copy = palloc_get_page (0);
-	if (fn_copy == NULL)
+	if (fn_copy == NULL){
+		list_remove(&cs->elem);
+		free(cs);
 		return TID_ERROR;
+	}
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	// file_name에서 파일명만 잘라서 줘야 함
@@ -59,11 +79,31 @@ process_create_initd (const char *file_name) {
 	strlcpy(cut_file_name, file_name, sizeof(cut_file_name));
 	char * only_file_name = strtok_r(cut_file_name, " ", &save_ptr);
 
+	struct thread_create_aux *aux = malloc(sizeof(struct thread_create_aux));
+	if(aux == NULL){
+		palloc_free_page(fn_copy);
+		list_remove(&cs->elem);
+		free(cs);
+		return TID_ERROR;
+	}
+
+	aux -> fn_copy = fn_copy;
+	aux -> cs = cs;
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (only_file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
+	// thread_create(스레드(파일)명, 우선순위, 바로 실행할 함수, 바로 실행할 함수에 전달할 인자)
+	tid = thread_create (only_file_name, PRI_DEFAULT, initd, aux);
+	if (tid == TID_ERROR){
 		palloc_free_page (fn_copy);
+		list_remove(&cs->elem);
+		free(cs);
+		free(aux);
 		return tid;
+	}
+
+	cs -> tid = tid;
+
+	return tid;
 }
 
 /* A thread function that launches first user process. */
@@ -73,10 +113,20 @@ initd (void *f_name) {
 	supplemental_page_table_init (&thread_current ()->spt);
 #endif
 
-	process_init ();
+	struct thread_create_aux *aux = f_name;
 
-	if (process_exec (f_name) < 0)
+	char *fn_copy = aux->fn_copy;
+
+	thread_current()->as_child = aux->cs;
+
+	free(aux);
+
+	// 기본 환경 구축(초기값 세팅)
+	process_init ();
+	// 인자로 받은 파일명을 디스크에 찾아 메모리에 적재/실행
+	if (process_exec (fn_copy) < 0)
 		PANIC("Fail to launch initd\n");
+	// 에러 발생
 	NOT_REACHED ();
 }
 
